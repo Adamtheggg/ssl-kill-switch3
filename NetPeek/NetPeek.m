@@ -1,5 +1,5 @@
-// NetPeek.m - minimal in-app traffic viewer, self contained.
-// No proxy, no certificates. Hooks NSURLSession/NSURLConnection.
+
+// NetPeek.m - in-app traffic viewer. No proxy, no certs, no FLEX.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -10,6 +10,7 @@
 
 static NSMutableArray *gLog;
 static NSMutableArray *gSeen;
+static UIWindow *gWin;
 
 static void NPAdd(NSString *s) {
     if (!s) return;
@@ -61,7 +62,6 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
            (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(data)]);
 }
 
-// ---------- viewer ----------
 @interface NPVC : UIViewController <UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tv;
 @property (nonatomic, strong) NSArray *rows;
@@ -99,7 +99,27 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
 }
 @end
 
-// ---------- hooks ----------
+@interface NPButton : UIButton
+@end
+
+@implementation NPButton
+- (void)go {
+    UIWindow *w = UIApplication.sharedApplication.keyWindow;
+    UIViewController *top = w.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    if (!top) return;
+    NPVC *v = [[NPVC alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:v];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [top presentViewController:nav animated:YES completion:nil];
+}
+- (void)drag:(UIPanGestureRecognizer *)g {
+    CGPoint p = [g translationInView:self.superview];
+    self.center = CGPointMake(self.center.x + p.x, self.center.y + p.y);
+    [g setTranslation:CGPointZero inView:self.superview];
+}
+@end
+
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))h {
     NPLogRequest(request);
@@ -124,15 +144,24 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
 
 @implementation NetPeek
 + (void)start {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *w = UIApplication.sharedApplication.keyWindow;
-        UIViewController *top = w.rootViewController;
-        while (top.presentedViewController) top = top.presentedViewController;
-        if (!top) return;
-        NPVC *v = [[NPVC alloc] init];
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:v];
-        nav.modalPresentationStyle = UIModalPresentationFullScreen;
-        [top presentViewController:nav animated:YES completion:nil];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        CGRect scr = UIScreen.mainScreen.bounds;
+        gWin = [[UIWindow alloc] initWithFrame:scr];
+        gWin.windowLevel = UIWindowLevelAlert + 1;
+        gWin.backgroundColor = [UIColor clearColor];
+        gWin.rootViewController = [[UIViewController alloc] init];
+        [gWin makeKeyAndVisible];
+
+        NPButton *b = [NPButton buttonWithType:UIButtonTypeCustom];
+        b.frame = CGRectMake(scr.size.width - 62, scr.size.height * 0.3, 46, 46);
+        b.backgroundColor = [UIColor colorWithRed:0.1 green:0.35 blue:0.9 alpha:0.85];
+        b.layer.cornerRadius = 23;
+        b.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+        b.titleLabel.numberOfLines = 2;
+        [b setTitle:@"NET\nPEEK" forState:UIControlStateNormal];
+        [b addTarget:b action:@selector(go) forControlEvents:UIControlEventTouchUpInside];
+        [b addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:b action:@selector(drag:)]];
+        [gWin.rootViewController.view addSubview:b];
     });
 }
 @end

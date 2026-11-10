@@ -19,10 +19,26 @@ static void NPAdd(NSString *s) {
 }
 
 static NSString *NPBody(NSData *d) {
-    if (!d.length) return @"(empty)";
+    if (!d.length) return @"(none)";
     NSString *t = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
     if (!t) return [NSString stringWithFormat:@"(%lu bytes binary)", (unsigned long)d.length];
     return t;
+}
+
+// read a body stream without consuming it for the real request
+static NSData *NPReadStream(NSInputStream *in, NSMutableURLRequest *m) {
+    if (!in) return nil;
+    [in open];
+    NSMutableData *out = [NSMutableData data];
+    uint8_t buf[4096];
+    NSInteger n = 0;
+    while ((n = [in read:buf maxLength:sizeof(buf)]) > 0) {
+        [out appendBytes:buf length:n];
+        if (out.length > 400000) break;
+    }
+    [in close];
+    if (m && out.length) m.HTTPBodyStream = [NSInputStream inputStreamWithData:out];
+    return out;
 }
 
 static NSString *NPHeaders(NSDictionary *h) {
@@ -41,11 +57,16 @@ static NSString *NPHeaders(NSDictionary *h) {
 }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)r { return r; }
 - (void)startLoading {
-    NSURLRequest *req = self.request;
+    NSMutableURLRequest *m = [self.request mutableCopy];
+    NSData *reqBody = nil;
+    if (m.HTTPBody) {
+        reqBody = m.HTTPBody;
+    } else if (m.HTTPBodyStream) {
+        reqBody = NPReadStream(m.HTTPBodyStream, m);
+    }
     NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n\n-- headers --\n%@\n-- body --\n%@",
-           req.HTTPMethod ?: @"GET", req.URL.absoluteString,
-           NPHeaders(req.allHTTPHeaderFields), NPBody(req.HTTPBody)]);
-    NSMutableURLRequest *m = [req mutableCopy];
+           m.HTTPMethod ?: @"GET", m.URL.absoluteString,
+           NPHeaders(m.allHTTPHeaderFields), NPBody(reqBody)]);
     [NSURLProtocol setProperty:@YES forKey:NP_MARK inRequest:m];
     NSURLSession *s = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     __weak typeof(self) w = self;
@@ -54,8 +75,13 @@ static NSString *NPHeaders(NSDictionary *h) {
         if (e) { [me.client URLProtocol:me didFailWithError:e]; return; }
         if ([r isKindOfClass:[NSHTTPURLResponse class]]) {
             NSHTTPURLResponse *h = (NSHTTPURLResponse *)r;
+            NSData *dec = d;
+            NSString *enc = [h.allHeaderFields[@"Content-Encoding"] lowercaseString];
+            if ([enc containsString:@"gzip"]) {
+                dec = [d isKindOfClass:[NSData class]] ? d : nil;
+            }
             NPAdd([NSString stringWithFormat:@"\n<<< %ld %@\n\n-- headers --\n%@\n-- body --\n%@",
-                   (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(d)]);
+                   (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(dec)]);
         }
         [me.client URLProtocol:me didReceiveResponse:r cacheStoragePolicy:NSURLCacheStorageNotAllowed];
         [me.client URLProtocol:me didLoadData:d];
@@ -129,7 +155,6 @@ static NSString *NPHeaders(NSDictionary *h) {
 @end
 
 @interface NPButton : UIButton @end
-
 @implementation NPButton
 - (void)go {
     UIWindow *w = nil;

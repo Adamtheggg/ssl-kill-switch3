@@ -3,9 +3,9 @@ TARGET := iphone:clang:latest:15.0
 FINALPACKAGE = 1
 
 TWEAK_NAME = SSLKillSwitch2
-SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.m
+SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.m NetPeek/NetPeek.m
 SSLKillSwitch2_CFLAGS = -fobjc-arc -ISSLKillSwitch/fishhook -Wno-error -Wno-format -Wno-everything
-SSLKillSwitch2_FRAMEWORKS = Security
+SSLKillSwitch2_FRAMEWORKS = Security UIKit Foundation
 
 SSLKillSwitch2_FILES += SSLKillSwitch/fishhook/fishhook.c
 SSLKillSwitch2_LOGOS_DEFAULT_GENERATOR = internal

@@ -1,2 +1,15 @@
+ARCHS := arm64
+TARGET := iphone:clang:latest:15.0
+FINALPACKAGE = 1
 
-ARCHS := arm64TARGET := iphone:clang:latest:15.0FINALPACKAGE = 1TWEAK_NAME = SSLKillSwitch2SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.mSSLKillSwitch2_CFLAGS = -fobjc-arcSSLKillSwitch2_CFLAGS += -ISSLKillSwitch/fishhookSSLKillSwitch2_FRAMEWORKS = SecuritySSLKillSwitch2_CFLAGS += -Wno-error -Wno-format -Wno-everythingifndef FISHHOOKifdef ROOTLESS$(info Build as a ROOTLESS Substrate Tweak)THEOS_PACKAGE_SCHEME=rootlessPACKAGE_BUILDNAME := rootlesselse ifdef ROOTHIDE$(info Build as a ROOTHIDE Substrate Tweak)THEOS_PACKAGE_SCHEME=roothidePACKAGE_BUILDNAME := roothideelse$(info Build as a ROOTFUL Substrate Tweak)PACKAGE_BUILDNAME := rootfulendifSSLKillSwitch2_CFLAGS += -DSUBSTRATE_BUILDelse$(info Build as a FishHook Tweak)SSLKillSwitch2_FILES += SSLKillSwitch/fishhook/fishhook.cSSLKillSwitch2_LOGOS_DEFAULT_GENERATOR = internalSSLKillSwitch2_CFLAGS += -DUSE_NSLOG
+TWEAK_NAME = SSLKillSwitch2
+SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.m
+SSLKillSwitch2_CFLAGS = -fobjc-arc -ISSLKillSwitch/fishhook -Wno-error -Wno-format -Wno-everything
+SSLKillSwitch2_FRAMEWORKS = Security
+
+SSLKillSwitch2_FILES += SSLKillSwitch/fishhook/fishhook.c
+SSLKillSwitch2_LOGOS_DEFAULT_GENERATOR = internal
+SSLKillSwitch2_CFLAGS += -DUSE_NSLOG
+
+include $(THEOS)/makefiles/common.mk
+include $(THEOS_MAKE_PATH)/tweak.mk

@@ -1,35 +1,30 @@
+
 // NetPeek.x - in-app traffic viewer. No proxy, no certs, no FLEX.
+// Capture via NSURLProtocol (no %hook), UI installed lazily.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-@interface NetPeek : NSObject
-+ (void)start;
-@end
+#define NP_MARK @"X-NetPeek"
 
 static NSMutableArray *gLog;
-static NSMutableArray *gSeen;
 static UIWindow *gWin;
+static BOOL gInstalling;
 
 static void NPAdd(NSString *s) {
     if (!s) return;
     if (!gLog) gLog = [NSMutableArray array];
     @synchronized (gLog) {
         [gLog insertObject:s atIndex:0];
-        while (gLog.count > 400) [gLog removeLastObject];
+        while (gLog.count > 300) [gLog removeLastObject];
     }
-}
-
-static BOOL NPIsHTTP(NSURL *u) {
-    NSString *s = u.scheme.lowercaseString;
-    return [s isEqualToString:@"http"] || [s isEqualToString:@"https"];
 }
 
 static NSString *NPBody(NSData *d) {
     if (!d.length) return @"(empty)";
     NSString *t = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-    if (!t) return [NSString stringWithFormat:@"(%lu bytes binary)", (unsigned long)d.length];
-    if (t.length > 4000) return [t substringToIndex:4000];
+    if (!t) return [NSString stringWithFormat:@"(%lu bytes)", (unsigned long)d.length];
+    if (t.length > 3000) return [t substringToIndex:3000];
     return t;
 }
 
@@ -40,26 +35,43 @@ static NSString *NPHeaders(NSDictionary *h) {
     return m;
 }
 
-static void NPLogRequest(NSURLRequest *r) {
-    if (![r isKindOfClass:[NSURLRequest class]]) return;
-    if (!NPIsHTTP(r.URL)) return;
-    if (!gSeen) gSeen = [NSMutableArray array];
-    @synchronized (gSeen) {
-        for (NSValue *v in gSeen) if (v.pointerValue == (__bridge void *)r) return;
-        [gSeen addObject:[NSValue valueWithPointer:(__bridge void *)r]];
-        if (gSeen.count > 500) [gSeen removeObjectAtIndex:0];
-    }
-    NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n%@\n%@",
-           r.HTTPMethod ?: @"GET", r.URL.absoluteString,
-           NPHeaders(r.allHTTPHeaderFields), NPBody(r.HTTPBody)]);
+@interface NPProto : NSURLProtocol @end
+@implementation NPProto
+
++ (BOOL)canInitWithRequest:(NSURLRequest *)r {
+    if (![r isKindOfClass:[NSURLRequest class]]) return NO;
+    if ([NSURLProtocol propertyForKey:NP_MARK inRequest:r]) return NO;
+    NSString *s = r.URL.scheme.lowercaseString;
+    return [s isEqualToString:@"http"] || [s isEqualToString:@"https"];
 }
 
-static void NPLogResponse(NSURLResponse *resp, NSData *data) {
-    if (![resp isKindOfClass:[NSHTTPURLResponse class]]) return;
-    NSHTTPURLResponse *h = (NSHTTPURLResponse *)resp;
-    NPAdd([NSString stringWithFormat:@"<<< %ld %@\n%@\n%@",
-           (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(data)]);
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)r { return r; }
+
+- (void)startLoading {
+    NSURLRequest *req = self.request;
+    NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n%@\n%@",
+           req.HTTPMethod ?: @"GET", req.URL.absoluteString,
+           NPHeaders(req.allHTTPHeaderFields), NPBody(req.HTTPBody)]);
+    NSMutableURLRequest *m = [req mutableCopy];
+    [NSURLProtocol setProperty:@YES forKey:NP_MARK inRequest:m];
+    NSURLSession *s = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+    __weak typeof(self) w = self;
+    [[s dataTaskWithRequest:m completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        __strong typeof(w) me = w; if (!me) return;
+        if (e) { [me.client URLProtocol:me didFailWithError:e]; return; }
+        if ([r isKindOfClass:[NSHTTPURLResponse class]]) {
+            NSHTTPURLResponse *h = (NSHTTPURLResponse *)r;
+            NPAdd([NSString stringWithFormat:@"<<< %ld %@\n%@\n%@",
+                   (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(d)]);
+        }
+        [me.client URLProtocol:me didReceiveResponse:r cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+        [me.client URLProtocol:me didLoadData:d];
+        [me.client URLProtocolDidFinishLoading:me];
+    }] resume];
 }
+
+- (void)stopLoading {}
+@end
 
 @interface NPVC : UIViewController <UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tv;
@@ -74,7 +86,6 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
     self.tv = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
     self.tv.dataSource = self;
     self.tv.backgroundColor = [UIColor blackColor];
-    self.tv.separatorColor = [UIColor darkGrayColor];
     [self.view addSubview:self.tv];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain target:self action:@selector(clear)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Close" style:UIBarButtonItemStyleDone target:self action:@selector(close)];
@@ -87,19 +98,18 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)i {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     c.backgroundColor = [UIColor blackColor];
-    c.textLabel.textColor = [UIColor colorWithWhite:0.9 alpha:1];
-    c.textLabel.numberOfLines = 6;
-    c.textLabel.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+    c.textLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1];
+    c.textLabel.numberOfLines = 8;
+    c.textLabel.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightRegular];
     c.textLabel.text = self.rows[i.row];
     return c;
 }
 @end
 
 @interface NPButton : UIButton @end
-
 @implementation NPButton
 - (void)go {
-    UIWindow *w = UIApplication.sharedApplication.keyWindow;
+    UIWindow *w = UIApplication.sharedApplication.windows.firstObject;
     UIViewController *top = w.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
     if (!top) return;
@@ -115,43 +125,27 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
 }
 @end
 
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))h {
-    NPLogRequest(request);
-    if (!h) return %orig;
-    return %orig(request, ^(NSData *d, NSURLResponse *r, NSError *e) {
-        NPLogResponse(r, d);
-        h(d, r, e);
-    });
-}
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
-    NPLogRequest(request);
-    return %orig;
-}
-%end
-
-%hook NSURLConnection
-+ (NSURLConnection *)connectionWithRequest:(NSURLRequest *)request delegate:(id)delegate {
-    NPLogRequest(request);
-    return %orig;
-}
-%end
-
-@implementation NetPeek
-+ (void)start {
+static void NPInstall(void) {
+    if (gWin || gInstalling) return;
+    gInstalling = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        CGRect scr = UIScreen.mainScreen.bounds;
-        gWin = [[UIWindow alloc] initWithFrame:scr];
-        gWin.windowLevel = UIWindowLevelAlert + 1;
+        gInstalling = NO;
+        if (gWin) return;
+        UIWindow *host = nil;
+        for (UIWindow *w in UIApplication.sharedApplication.windows) { if (w.isKeyWindow) { host = w; break; } }
+        if (!host) host = UIApplication.sharedApplication.windows.firstObject;
+        if (!host) return;
+        CGRect f = host.bounds;
+        gWin = [[UIWindow alloc] initWithFrame:f];
+        gWin.windowLevel = UIWindowLevelNormal + 1;
         gWin.backgroundColor = [UIColor clearColor];
         gWin.rootViewController = [[UIViewController alloc] init];
-        [gWin makeKeyAndVisible];
-
+        gWin.hidden = NO;
         NPButton *b = [NPButton buttonWithType:UIButtonTypeCustom];
-        b.frame = CGRectMake(scr.size.width - 62, scr.size.height * 0.3, 46, 46);
+        b.frame = CGRectMake(f.size.width - 60, f.size.height * 0.32, 44, 44);
         b.backgroundColor = [UIColor colorWithRed:0.1 green:0.35 blue:0.9 alpha:0.85];
-        b.layer.cornerRadius = 23;
-        b.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+        b.layer.cornerRadius = 22;
+        b.titleLabel.font = [UIFont boldSystemFontOfSize:10];
         b.titleLabel.numberOfLines = 2;
         [b setTitle:@"NET\nPEEK" forState:UIControlStateNormal];
         [b addTarget:b action:@selector(go) forControlEvents:UIControlEventTouchUpInside];
@@ -159,8 +153,12 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
         [gWin.rootViewController.view addSubview:b];
     });
 }
-@end
 
 %ctor {
-    [NetPeek start];
+    [NSURLProtocol registerClass:objc_getClass("NPProto")];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *n) { NPInstall(); }];
+    NPInstall();
 }

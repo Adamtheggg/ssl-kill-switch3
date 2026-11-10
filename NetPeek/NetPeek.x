@@ -1,6 +1,6 @@
 
 // NetPeek.x - in-app traffic viewer. No proxy, no certs, no FLEX.
-// Capture via NSURLProtocol (no %hook), UI installed lazily.
+// Capture via NSURLProtocol. Button added directly to key window.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -8,8 +8,8 @@
 #define NP_MARK @"X-NetPeek"
 
 static NSMutableArray *gLog;
-static UIWindow *gWin;
-static BOOL gInstalling;
+static NSMutableArray *gSeen;
+static UIButton *gBtn;
 
 static void NPAdd(NSString *s) {
     if (!s) return;
@@ -37,16 +37,12 @@ static NSString *NPHeaders(NSDictionary *h) {
 
 @interface NPProto : NSURLProtocol @end
 @implementation NPProto
-
 + (BOOL)canInitWithRequest:(NSURLRequest *)r {
-    if (![r isKindOfClass:[NSURLRequest class]]) return NO;
     if ([NSURLProtocol propertyForKey:NP_MARK inRequest:r]) return NO;
     NSString *s = r.URL.scheme.lowercaseString;
     return [s isEqualToString:@"http"] || [s isEqualToString:@"https"];
 }
-
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)r { return r; }
-
 - (void)startLoading {
     NSURLRequest *req = self.request;
     NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n%@\n%@",
@@ -69,7 +65,6 @@ static NSString *NPHeaders(NSDictionary *h) {
         [me.client URLProtocolDidFinishLoading:me];
     }] resume];
 }
-
 - (void)stopLoading {}
 @end
 
@@ -109,7 +104,9 @@ static NSString *NPHeaders(NSDictionary *h) {
 @interface NPButton : UIButton @end
 @implementation NPButton
 - (void)go {
-    UIWindow *w = UIApplication.sharedApplication.windows.firstObject;
+    UIWindow *w = nil;
+    for (UIWindow *x in UIApplication.sharedApplication.windows) { if (x.isKeyWindow) { w = x; break; } }
+    if (!w) w = UIApplication.sharedApplication.windows.firstObject;
     UIViewController *top = w.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
     if (!top) return;
@@ -126,32 +123,31 @@ static NSString *NPHeaders(NSDictionary *h) {
 @end
 
 static void NPInstall(void) {
-    if (gWin || gInstalling) return;
-    gInstalling = YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        gInstalling = NO;
-        if (gWin) return;
-        UIWindow *host = nil;
-        for (UIWindow *w in UIApplication.sharedApplication.windows) { if (w.isKeyWindow) { host = w; break; } }
-        if (!host) host = UIApplication.sharedApplication.windows.firstObject;
-        if (!host) return;
-        CGRect f = host.bounds;
-        gWin = [[UIWindow alloc] initWithFrame:f];
-        gWin.windowLevel = UIWindowLevelNormal + 1;
-        gWin.backgroundColor = [UIColor clearColor];
-        gWin.rootViewController = [[UIViewController alloc] init];
-        gWin.hidden = NO;
-        NPButton *b = [NPButton buttonWithType:UIButtonTypeCustom];
-        b.frame = CGRectMake(f.size.width - 60, f.size.height * 0.32, 44, 44);
-        b.backgroundColor = [UIColor colorWithRed:0.1 green:0.35 blue:0.9 alpha:0.85];
-        b.layer.cornerRadius = 22;
-        b.titleLabel.font = [UIFont boldSystemFontOfSize:10];
-        b.titleLabel.numberOfLines = 2;
-        [b setTitle:@"NET\nPEEK" forState:UIControlStateNormal];
-        [b addTarget:b action:@selector(go) forControlEvents:UIControlEventTouchUpInside];
-        [b addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:b action:@selector(drag:)]];
-        [gWin.rootViewController.view addSubview:b];
-    });
+    if (gBtn && gBtn.superview) return;
+    UIWindow *host = nil;
+    for (UIWindow *w in UIApplication.sharedApplication.windows) { if (w.isKeyWindow) { host = w; break; } }
+    if (!host) host = UIApplication.sharedApplication.windows.firstObject;
+    if (!host) return;
+    CGRect f = host.bounds;
+    gBtn = [NPButton buttonWithType:UIButtonTypeCustom];
+    gBtn.frame = CGRectMake(f.size.width - 58, f.size.height * 0.35, 44, 44);
+    gBtn.backgroundColor = [UIColor colorWithRed:0.1 green:0.35 blue:0.9 alpha:0.9];
+    gBtn.layer.cornerRadius = 22;
+    gBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+    gBtn.titleLabel.numberOfLines = 2;
+    [gBtn setTitle:@"NET\nPEEK" forState:UIControlStateNormal];
+    [gBtn addTarget:gBtn action:@selector(go) forControlEvents:UIControlEventTouchUpInside];
+    [gBtn addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:gBtn action:@selector(drag:)]];
+    [host addSubview:gBtn];
+    [host bringSubviewToFront:gBtn];
+}
+
+static void NPBootstrap(void) {
+    for (int i = 0; i < 10; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NPInstall();
+        });
+    }
 }
 
 %ctor {
@@ -159,6 +155,6 @@ static void NPInstall(void) {
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification *n) { NPInstall(); }];
-    NPInstall();
+                                                  usingBlock:^(NSNotification *n) { NPBootstrap(); }];
+    NPBootstrap();
 }

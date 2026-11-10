@@ -1,11 +1,14 @@
 
-ARCHS := arm64 arm64e
+ARCHS := arm64
+TARGET := iphoneos:clang:latest:15.0
+FINALPACKAGE = 1
 
 TWEAK_NAME = SSLKillSwitch2
 SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.m
 SSLKillSwitch2_CFLAGS = -fobjc-arc
 SSLKillSwitch2_CFLAGS += -ISSLKillSwitch/fishhook
 SSLKillSwitch2_FRAMEWORKS = Security
+SSLKillSwitch2_CFLAGS += -Wno-error -Wno-format -Wno-everything
 
 ifndef FISHHOOK
 
@@ -20,10 +23,6 @@ PACKAGE_BUILDNAME := roothide
 else
 $(info Build as a ROOTFUL Substrate Tweak)
 PACKAGE_BUILDNAME := rootful
-endif
-
-ifneq ($(findstring DEBUG,$(THEOS_SCHEMA)),)
-PACKAGE_BUILDNAME := $(PACKAGE_BUILDNAME)debug
 endif
 
 SSLKillSwitch2_CFLAGS += -DSUBSTRATE_BUILD

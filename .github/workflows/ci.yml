@@ -25,12 +25,14 @@ jobs:
       uses: Randomblock1/theos-action@v1.4
       with:
         theos-dir: ${{ github.workspace }}/theos
-        theos-src: https://github.com/theos/theos
+        theos-src: https://github.com/roothide/theos
         theos-sdks: https://github.com/theos/sdks
         theos-sdks-branch: master
         orion: false
     - name: Build fishhook deb
       run: make clean && make package FISHHOOK=1 FINALPACKAGE=1
+    - name: Show package
+      run: ls -la packages/
     - name: Create GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}

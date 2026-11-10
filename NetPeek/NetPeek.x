@@ -1,6 +1,5 @@
 
 // NetPeek.x - in-app traffic viewer. No proxy, no certs, no FLEX.
-// Capture via NSURLProtocol. Button added directly to key window.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -8,7 +7,6 @@
 #define NP_MARK @"X-NetPeek"
 
 static NSMutableArray *gLog;
-static NSMutableArray *gSeen;
 static UIButton *gBtn;
 
 static void NPAdd(NSString *s) {
@@ -23,8 +21,7 @@ static void NPAdd(NSString *s) {
 static NSString *NPBody(NSData *d) {
     if (!d.length) return @"(empty)";
     NSString *t = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-    if (!t) return [NSString stringWithFormat:@"(%lu bytes)", (unsigned long)d.length];
-    if (t.length > 3000) return [t substringToIndex:3000];
+    if (!t) return [NSString stringWithFormat:@"(%lu bytes binary)", (unsigned long)d.length];
     return t;
 }
 
@@ -45,7 +42,7 @@ static NSString *NPHeaders(NSDictionary *h) {
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)r { return r; }
 - (void)startLoading {
     NSURLRequest *req = self.request;
-    NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n%@\n%@",
+    NPAdd([NSString stringWithFormat:@"\n>>> %@ %@\n\n-- headers --\n%@\n-- body --\n%@",
            req.HTTPMethod ?: @"GET", req.URL.absoluteString,
            NPHeaders(req.allHTTPHeaderFields), NPBody(req.HTTPBody)]);
     NSMutableURLRequest *m = [req mutableCopy];
@@ -57,7 +54,7 @@ static NSString *NPHeaders(NSDictionary *h) {
         if (e) { [me.client URLProtocol:me didFailWithError:e]; return; }
         if ([r isKindOfClass:[NSHTTPURLResponse class]]) {
             NSHTTPURLResponse *h = (NSHTTPURLResponse *)r;
-            NPAdd([NSString stringWithFormat:@"<<< %ld %@\n%@\n%@",
+            NPAdd([NSString stringWithFormat:@"\n<<< %ld %@\n\n-- headers --\n%@\n-- body --\n%@",
                    (long)h.statusCode, h.URL.absoluteString, NPHeaders(h.allHeaderFields), NPBody(d)]);
         }
         [me.client URLProtocol:me didReceiveResponse:r cacheStoragePolicy:NSURLCacheStorageNotAllowed];
@@ -68,7 +65,29 @@ static NSString *NPHeaders(NSDictionary *h) {
 - (void)stopLoading {}
 @end
 
-@interface NPVC : UIViewController <UITableViewDataSource>
+@interface NPDVC : UIViewController
+@property (nonatomic, copy) NSString *text;
+@end
+
+@implementation NPDVC
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Details";
+    self.view.backgroundColor = [UIColor blackColor];
+    UITextView *tv = [[UITextView alloc] initWithFrame:self.view.bounds];
+    tv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    tv.backgroundColor = [UIColor blackColor];
+    tv.textColor = [UIColor whiteColor];
+    tv.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    tv.editable = NO;
+    tv.text = self.text;
+    [self.view addSubview:tv];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Copy" style:UIBarButtonItemStyleDone target:self action:@selector(copyAll)];
+}
+- (void)copyAll { [UIPasteboard generalPasteboard].string = self.text; }
+@end
+
+@interface NPVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) UITableView *tv;
 @property (nonatomic, strong) NSArray *rows;
 @end
@@ -80,6 +99,7 @@ static NSString *NPHeaders(NSDictionary *h) {
     self.view.backgroundColor = [UIColor blackColor];
     self.tv = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
     self.tv.dataSource = self;
+    self.tv.delegate = self;
     self.tv.backgroundColor = [UIColor blackColor];
     [self.view addSubview:self.tv];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain target:self action:@selector(clear)];
@@ -94,14 +114,22 @@ static NSString *NPHeaders(NSDictionary *h) {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     c.backgroundColor = [UIColor blackColor];
     c.textLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1];
-    c.textLabel.numberOfLines = 8;
+    c.textLabel.numberOfLines = 5;
     c.textLabel.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightRegular];
     c.textLabel.text = self.rows[i.row];
+    c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return c;
+}
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)i {
+    [t deselectRowAtIndexPath:i animated:YES];
+    NPDVC *d = [[NPDVC alloc] init];
+    d.text = self.rows[i.row];
+    [self.navigationController pushViewController:d animated:YES];
 }
 @end
 
 @interface NPButton : UIButton @end
+
 @implementation NPButton
 - (void)go {
     UIWindow *w = nil;

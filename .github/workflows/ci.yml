@@ -26,7 +26,7 @@ jobs:
       with:
         theos-dir: ${{ github.workspace }}/theos
         theos-src: https://github.com/roothide/theos
-        theos-sdks: https://github.com/theos/sdks
+        theos-sdks: https://github.com/xybp888/iOS-SDKs
         theos-sdks-branch: master
         orion: false
     - name: Build fishhook deb

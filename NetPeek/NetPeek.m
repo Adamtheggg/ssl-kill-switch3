@@ -165,3 +165,7 @@ static void NPLogResponse(NSURLResponse *resp, NSData *data) {
     });
 }
 @end
+
+%ctor {
+    [NetPeek start];
+}

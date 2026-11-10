@@ -30,8 +30,8 @@ jobs:
         theos-sdks-branch: master
         orion: false
     - name: Build fishhook deb
-      run: make clean && make package FISHHOOK=1 FINALPACKAGE=1
-    - name: Show package
+      run: make package FISHHOOK=1 FINALPACKAGE=1
+    - name: List package
       run: ls -la packages/
     - name: Create GitHub Release
       env:
